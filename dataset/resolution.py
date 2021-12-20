@@ -15,12 +15,12 @@ class ResizeResolution():
         else:
             raise ValueError("not support!")
 
-        lcmap, lcoff, lleng, angle = ResizeResolution.resolution_fclip(lpos, resolu, ang_type)
+        lcmap, lcoff, lleng, angle = ResizeResolution.resolution_glsd(lpos, resolu, ang_type)
 
         return image_, lcmap, lcoff, lleng, angle
 
     @staticmethod
-    def resolution_fclip(lpos, resolu, ang_type="radian"):
+    def resolution_glsd(lpos, resolu, ang_type="radian"):
         heatmap_scale = (resolu, resolu)
         scale = resolu / 128
 
@@ -28,7 +28,7 @@ class ResizeResolution():
 
         lcmap = np.zeros(heatmap_scale, dtype=np.float32)  # (resolu, resolu)
         lcoff = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, resolu, resolu)
-        lleng = np.zeros(heatmap_scale, dtype=np.float32)  # (resolu, resolu)
+        lleng = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, resolu, resolu)
         angle = np.zeros(heatmap_scale, dtype=np.float32)  # (resolu, resolu)
 
         lines[:, :, 0] = np.clip(lines[:, :, 0], 0, heatmap_scale[0] - 1e-4)
@@ -39,7 +39,9 @@ class ResizeResolution():
             vint = tuple(map(int, v))
             lcmap[vint] = 1
             lcoff[:, vint[0], vint[1]] = v - vint - 0.5
-            lleng[vint] = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # L
+            leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
+            lleng[0][vint] = leng / 2
+            lleng[1][vint] = leng / 2
 
             if v0[0] <= v[0]:
                 vv = v0
@@ -51,7 +53,7 @@ class ResizeResolution():
                 continue
             angle[vint] = np.sum((vv - v) * np.array([0., 1.])) / np.sqrt(np.sum((vv - v) ** 2))  # theta
 
-        lleng_ = np.clip(lleng, 0, 64 * scale - 1e-4) / (64 * scale)
+        lleng_ = np.clip(lleng, 0, 32 * scale - 1e-4) / (32 * scale)
 
         if ang_type == "cosine":
             angle = (angle + 1) * lcmap / 2

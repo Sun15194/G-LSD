@@ -31,7 +31,7 @@ from scipy.ndimage import zoom
 try:
     sys.path.append("")
     sys.path.append("../data")
-    from FClip.utils import parmap
+    from glsd.utils import parmap
 except Exception:
     raise
 
@@ -52,7 +52,7 @@ def save_heatmap(prefix, image, lines):
 
     lcmap = np.zeros(heatmap_scale, dtype=np.float32)  # (128, 128)
     lcoff = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, 128, 128)
-    lleng = np.zeros(heatmap_scale, dtype=np.float32)  # (128, 128)
+    lleng = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, 128, 128)
     angle = np.zeros(heatmap_scale, dtype=np.float32)  # (128, 128)
 
     # the coordinate of lines can not equal to 128 (less than 128).
@@ -60,12 +60,28 @@ def save_heatmap(prefix, image, lines):
     lines[:, :, 1] = np.clip(lines[:, :, 1] * fy, 0, heatmap_scale[1] - 1e-4)
     lines = lines[:, :, ::-1]  # change position of x and y --> (r, c)
 
+    # center = (v0 + v1) / 2
+    # leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2
+    # if leng < 3:
+    #     target = [center]
+    # elif leng >= 3 and leng < 10:
+    #     k = [1, 2, 3]
+    #     target = v0 * k / 5 + v1 * (5-k) / 5
+    # else:
+    #     k = range(10)
+    #     target = v0 * k / 10 + v1 * (10-k) / 10
+    #
+    # for v in target:
+    #     vint = to_int(v)
+
     for v0, v1 in lines:
         v = (v0 + v1) / 2
         vint = to_int(v)
         lcmap[vint] = 1
         lcoff[:, vint[0], vint[1]] = v - vint - 0.5
-        lleng[vint] = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
+        leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
+        lleng[0][vint] = leng / 2
+        lleng[1][vint] = leng / 2
 
         # 令vv是v在x轴方向坐标那个端点
         if v0[0] <= v[0]:
@@ -140,7 +156,7 @@ def save_heatmap(prefix, image, lines):
         # aspect_ratio=image.shape[1] / image.shape[0],
         lcmap=lcmap,            # [128, 128], value=0/1
         lcoff=lcoff,            # [2, 128, 128]
-        lleng=lleng,            # [128, 128]
+        lleng=lleng,            # [2, 128, 128]
         angle=angle,            # [128, 128]
     )
     cv2.imwrite(f"{prefix}.png", image)
@@ -260,8 +276,6 @@ def main():
         # multiprocessing the function of handle with augment 'dataset'.
         parmap(handle, dataset, 16)
 
-
 if __name__ == "__main__":
-
     main()
 

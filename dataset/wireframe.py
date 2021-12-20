@@ -31,7 +31,7 @@ from wireframe_line import prepare_rotation, coor_rot90
 try:
     sys.path.append("")
     sys.path.append("../data")
-    from FClip.utils import parmap
+    from glsd.utils import parmap
 except Exception:
     raise
 
@@ -62,6 +62,7 @@ def save_heatmap(prefix, image, lines):
     lmap = np.zeros(heatmap_scale, dtype=np.float32)  # (128, 128)
 
     # the coordinate of lines can not equal to 128 (less than 128).
+    # 将线的表示从(512,512)坐标大小变成(128,128)
     lines[:, :, 0] = np.clip(lines[:, :, 0] * fx, 0, heatmap_scale[0] - 1e-4)
     lines[:, :, 1] = np.clip(lines[:, :, 1] * fy, 0, heatmap_scale[1] - 1e-4)
     lines = lines[:, :, ::-1]  # change position of x and y
@@ -110,6 +111,7 @@ def save_heatmap(prefix, image, lines):
         # 可以看成是 joff[0, :, vint[0], vint[1]] = v[:2] - (vint + 0.5)
         joff[0, :, vint[0], vint[1]] = v[:2] - vint - 0.5
 
+    # scipy.ndimage.zoom：缩放数组（input, output）
     llmap = zoom(lmap, [0.5, 0.5])  # down sampler lmap     lmap[128,128] -> llmap[64,64]
     lineset = set([frozenset(l) for l in lnid])
     # 将连接点集做排列组合两两匹配
@@ -121,6 +123,7 @@ def save_heatmap(prefix, image, lines):
             lneg.append([v0, v1, i0, i1, np.average(np.minimum(value, llmap[rr, cc]))])  # ?why minimum  hardness score?
 
     assert len(lneg) != 0
+    # 将lneg按照最后一项hardness score排序
     lneg.sort(key=lambda l: -l[-1])
 
     junc = np.array(junc, dtype=np.float32)
@@ -164,6 +167,27 @@ def save_heatmap(prefix, image, lines):
     )
 
 
+'''
+    json文件格式：
+        filename："00031546.png",
+        lines:[
+            [
+                37.6640205383301,
+                2.70894418008538E-14,
+                154.431030273438,
+                243.869735717773
+            ],
+            ......
+            [
+                154.431030273438,
+                243.869735717773,
+                171.289276123047,
+                244.252868652344
+            ]
+        ],
+        height: 500,
+        width: 452
+'''
 def main():
     args = docopt(__doc__)
     data_root = args["<src>"]
