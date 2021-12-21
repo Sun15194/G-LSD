@@ -27,7 +27,9 @@ import skimage.draw
 import matplotlib.pyplot as plt
 from docopt import docopt
 from scipy.ndimage import zoom
+import seaborn as sns
 
+sns.set()
 try:
     sys.path.append("")
     sys.path.append("../data")
@@ -54,11 +56,13 @@ def save_heatmap(prefix, image, lines):
     lcoff = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, 128, 128)
     lleng = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, 128, 128)
     angle = np.zeros(heatmap_scale, dtype=np.float32)  # (128, 128)
+    xmap = np.zeros(heatmap_scale, dtype=np.float32)
+    ymap = np.zeros(heatmap_scale, dtype=np.float32)
 
     # the coordinate of lines can not equal to 128 (less than 128).
     lines[:, :, 0] = np.clip(lines[:, :, 0] * fx, 0, heatmap_scale[0] - 1e-4)
     lines[:, :, 1] = np.clip(lines[:, :, 1] * fy, 0, heatmap_scale[1] - 1e-4)
-    lines = lines[:, :, ::-1]  # change position of x and y --> (r, c)
+    # lines = lines[:, :, ::-1]  # change position of x and y --> (r, c)
 
     # center = (v0 + v1) / 2
     # leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2
@@ -75,105 +79,112 @@ def save_heatmap(prefix, image, lines):
     #     vint = to_int(v)
 
     for v0, v1 in lines:
-        v = (v0 + v1) / 2
-        vint = to_int(v)
-        lcmap[vint] = 1
-        lcoff[:, vint[0], vint[1]] = v - vint - 0.5
-        leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
-        lleng[0][vint] = leng / 2
-        lleng[1][vint] = leng / 2
+        if v0[0] > v1[0]:
+            temp = v1
+            v1 = v0
+            v0 =temp
+        vint0, vint1 = to_int(v0), to_int(v1)
+        cc, rr = skimage.draw.line(*vint0, *vint1)
+        lcmap[rr, cc] = 1
 
-        # 令vv是v在x轴方向坐标那个端点
-        if v0[0] <= v[0]:
-            vv = v0
+        x1, y1, x2, y2 = v0[0], v0[1], v1[0], v1[1]
+        v = (v0 + v1) / 2
+
+        if (x2 - x1) <= 1e-4:
+            xmap[rr, cc] = x1
+            ymap[rr, cc] = cc + 0.5
         else:
-            vv = v1
+            k = (y2 - y1) / (x2 - x1)
+            b = y1 - k * x1
+            ax = k / (k * k + 1)
+            bx = 1 / (k * k + 1)
+            cx = -1 * k *b / (k * k + 1)
+            ay = k * k / (k * k + 1)
+            by = k / (k * k + 1)
+            cy = b / (k * k + 1)
+
+            xmap[rr, cc] = ax * (cc + 0.5) + bx * (rr + 0.5) + cx
+            ymap[rr, cc] = ay * (cc + 0.5) + by * (rr + 0.5) + cy
+
+        lcoff[0][rr, cc] = xmap[rr, cc] - rr - 0.5
+        lcoff[1][rr, cc] = ymap[rr, cc] - cc - 0.5
+
+        lleng[0][rr, cc] = np.power(np.power((xmap[rr, cc] - v0[0]), 2) + np.power((ymap[rr, cc] - v0[1]), 2), 0.5)
+        lleng[1][rr, cc] = np.power(np.power((xmap[rr, cc] - v1[0]), 2) + np.power((ymap[rr, cc] - v1[1]), 2), 0.5)
 
         # the angle under the image coordinate system (r, c)                    图像坐标系下的角度(r, c)
         # theta means the component along the c direction on the unit vector    θ表示单位向量上沿c方向的分量
-        if np.sqrt(np.sum((vv - v) ** 2)) <= 1e-4:
+        if np.sqrt(np.sum((v0 - v) ** 2)) <= 1e-4:
             continue
-        # 此处的angle的实质为cosθ
-        angle[vint] = np.sum((vv - v) * np.array([0., 1.])) / np.sqrt(np.sum((vv - v) ** 2))  # theta
 
-        # the junction coordinate(image coordinate system) of line can be recovered by follows:
-        # direction = [-sqrt(1-theta^2), theta]
-        # (-sqrt(1-theta^2) means the component along the r direction on the unit vector, it always negative.)
-        # center = coordinate(lcmap) + offset + 0.5
-        # J = center (+-) direction * lleng  (+-) means two end points
-        '''
-            线的连接点坐标(图像坐标系)可以通过以下方法恢复:
-            direction = [-sqrt(1-theta^2), theta]
-            其中-sqrt(1-theta^2)表示单位向量上r方向的分量，它总是负的。
-            center = coordinate(lcmap) + offset + 0.5
-            J = center ± direction * lleng
-            ±表示两个端点
-        '''
+        # 此处的angle的实质为cosθ
+        angle[rr, cc] = np.sum((v0 - v) * np.array([0., 1.])) / np.sqrt(np.sum((v0 - v) ** 2))  # theta
 
     image = cv2.resize(image, im_rescale)
 
-    # plt.figure()
-    # plt.imshow(image)
-    # for v0, v1 in lines:
-    #     plt.plot([v0[1] * 4, v1[1] * 4], [v0[0] * 4, v1[0] * 4])
-    # plt.savefig(f"dataset/{os.path.basename(prefix)}_line.png", dpi=200), plt.close()
-    # return
-
-    # coor = np.argwhere(lcmap == 1)
-    # for yx in coor:
-    #     offset = lcoff[:, int(yx[0]), int(yx[1])]
-    #     length = lleng[int(yx[0]), int(yx[1])]
-    #     theta = angle[int(yx[0]), int(yx[1])]
-    #
-    #     center = yx + offset
-    #     d = np.array([-np.sqrt(1-theta**2), theta])
-    #     plt.scatter(center[1]*4, center[0]*4, c="b")
-    #
-    #     plt.arrow(center[1]*4, center[0]*4, d[1]*length*4, d[0]*length*4,
-    #               length_includes_head=True,
-    #               head_width=15, head_length=25, fc='r', ec='b')
-
-    # plt.savefig(f"{prefix}_line.png", dpi=200), plt.close()
-
-    # plt.subplot(122), \
-    # plt.imshow(image)
-    # coor = np.argwhere(lcmap == 1)
-    # for yx in coor:
-    #     offset = lcoff[:, int(yx[0]), int(yx[1])]
-    #     length = lleng[int(yx[0]), int(yx[1])]
-    #     theta = angle[int(yx[0]), int(yx[1])]
-    #
-    #     center = yx + offset
-    #     d = np.array([-np.sqrt(1-theta**2), theta])
-    #
-    #     n0 = center + d * length
-    #     n1 = center - d * length
-    #     plt.plot([n0[1] * 4, n1[1] * 4], [n0[0] * 4, n1[0] * 4])
-    # plt.savefig(f"{prefix}_line.png", dpi=100), plt.close()
+    # fig = plt.figure()
+    # sns_plot = sns.heatmap(lcmap)
+    # plt.show()
 
     np.savez_compressed(
         f"{prefix}_line.npz",
         # aspect_ratio=image.shape[1] / image.shape[0],
-        lcmap=lcmap,            # [128, 128], value=0/1
-        lcoff=lcoff,            # [2, 128, 128]
-        lleng=lleng,            # [2, 128, 128]
-        angle=angle,            # [128, 128]
+        lcmap=lcmap,  # [128, 128], value=0/1
+        lcoff=lcoff,  # [2, 128, 128]
+        lleng=lleng,  # [2, 128, 128]
+        angle=angle,  # [128, 128]
     )
     cv2.imwrite(f"{prefix}.png", image)
 
+    # leng = np.sqrt(np.sum((v0 - v1) ** 2))
+    # v = (v0 + v1) / 2
+    # vint = to_int(v)
+    # lcmap[vint] = 1
+    # lcoff[:, vint[0], vint[1]] = v - vint - 0.5
+    # leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
+    # lleng[0][vint] = leng / 2
+    # lleng[1][vint] = leng / 2
 
+    # 令vv是v在x轴方向坐标那个端点
+    # if v0[0] <= v[0]:
+    #     vv = v0
+    # else:
+    #     vv = v1
+
+    # the angle under the image coordinate system (r, c)                    图像坐标系下的角度(r, c)
+    # theta means the component along the c direction on the unit vector    θ表示单位向量上沿c方向的分量
+    # if np.sqrt(np.sum((vv - v) ** 2)) <= 1e-4:
+    #     continue
+    # 此处的angle的实质为cosθ
+    # angle[vint] = np.sum((vv - v) * np.array([0., 1.])) / np.sqrt(np.sum((vv - v) ** 2))  # theta
+
+    # the junction coordinate(image coordinate system) of line can be recovered by follows:
+    # direction = [-sqrt(1-theta^2), theta]
+    # (-sqrt(1-theta^2) means the component along the r direction on the unit vector, it always negative.)
+    # center = coordinate(lcmap) + offset + 0.5
+    # J = center (+-) direction * lleng  (+-) means two end points
     '''
-        在图像上逆时针旋转坐标90度
+        线的连接点坐标(图像坐标系)可以通过以下方法恢复:
+        direction = [-sqrt(1-theta^2), theta]
+        其中-sqrt(1-theta^2)表示单位向量上r方向的分量，它总是负的。
+        center = coordinate(lcmap) + offset + 0.5
+        J = center ± direction * lleng
+        ±表示两个端点
+    '''
 
-        (x, y) --> (p-q+y, p+q-x) 代表点(x,y)沿着图片中心点(p,q)顺时针旋转90度
-        但是，y方向是逆的，不是上而是下。
-        所以它等于逆时针旋转坐标。
 
-        coordinares: [n, 2];    center：(p, q)旋转中心。
-        坐标和中心应该遵循(x, y)顺序，而不是(h, w)。
+'''
+    在图像上逆时针旋转坐标90度
+
+    (x, y) --> (p-q+y, p+q-x) 代表点(x,y)沿着图片中心点(p,q)顺时针旋转90度
+    但是，y方向是逆的，不是上而是下。
+    所以它等于逆时针旋转坐标。
+
+    coordinares: [n, 2];    center：(p, q)旋转中心。
+    坐标和中心应该遵循(x, y)顺序，而不是(h, w)。
         
-        k是逆时针旋转90度的次数，旋转一次为逆时针90度，旋转三次为顺时针90度
-    '''
+    k是逆时针旋转90度的次数，旋转一次为逆时针90度，旋转三次为顺时针90度
+'''
 def coor_rot90(coordinates, center, k):
     # !!!rotate the coordinates 90 degree anticlockwise on image!!!!
 

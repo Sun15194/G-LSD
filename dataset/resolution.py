@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-
+import skimage.draw
 
 class ResizeResolution():
 
@@ -30,30 +30,52 @@ class ResizeResolution():
         lcoff = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, resolu, resolu)
         lleng = np.zeros((2,) + heatmap_scale, dtype=np.float32)  # (2, resolu, resolu)
         angle = np.zeros(heatmap_scale, dtype=np.float32)  # (resolu, resolu)
+        xmap = np.zeros(heatmap_scale, dtype=np.float32)
+        ymap = np.zeros(heatmap_scale, dtype=np.float32)
 
         lines[:, :, 0] = np.clip(lines[:, :, 0], 0, heatmap_scale[0] - 1e-4)
         lines[:, :, 1] = np.clip(lines[:, :, 1], 0, heatmap_scale[1] - 1e-4)
 
         for v0, v1 in lines:
+            if v0[0] > v1[0]:
+                temp = v1
+                v1 = v0
+                v0 = temp
+            vint0, vint1 = tuple(map(int, v0)), tuple(map(int, v1))
+            cc, rr = skimage.draw.line(*vint0, *vint1)
+            lcmap[rr, cc] = 1
+
+            x1, y1, x2, y2 = v0[0], v0[1], v1[0], v1[1]
             v = (v0 + v1) / 2
-            vint = tuple(map(int, v))
-            lcmap[vint] = 1
-            lcoff[:, vint[0], vint[1]] = v - vint - 0.5
-            leng = np.sqrt(np.sum((v0 - v1) ** 2)) / 2  # 两点之间距离计算公式
-            lleng[0][vint] = leng / 2
-            lleng[1][vint] = leng / 2
 
-            if v0[0] <= v[0]:
-                vv = v0
+            if (x2 - x1) <= 1e-4:
+                xmap[rr, cc] = x1
+                ymap[rr, cc] = cc + 0.5
             else:
-                vv = v1
-            # the angle under the image coordinate system (r, c)
-            # theta means the component along the c direction on the unit vector
-            if np.sqrt(np.sum((vv - v) ** 2)) <= 1e-4:
-                continue
-            angle[vint] = np.sum((vv - v) * np.array([0., 1.])) / np.sqrt(np.sum((vv - v) ** 2))  # theta
+                k = (y2 - y1) / (x2 - x1)
+                b = y1 - k * x1
+                ax = k / (k * k + 1)
+                bx = 1 / (k * k + 1)
+                cx = -1 * k * b / (k * k + 1)
+                ay = k * k / (k * k + 1)
+                by = k / (k * k + 1)
+                cy = b / (k * k + 1)
 
-        lleng_ = np.clip(lleng, 0, 32 * scale - 1e-4) / (32 * scale)
+                xmap[rr, cc] = ax * (cc + 0.5) + bx * (rr + 0.5) + cx
+                ymap[rr, cc] = ay * (cc + 0.5) + by * (rr + 0.5) + cy
+
+            lcoff[0][rr, cc] = xmap[rr, cc] - rr - 0.5
+            lcoff[1][rr, cc] = ymap[rr, cc] - cc - 0.5
+
+            lleng[0][rr, cc] = np.power(np.power((xmap[rr, cc] - v0[0]), 2) + np.power((ymap[rr, cc] - v0[1]), 2), 0.5)
+            lleng[1][rr, cc] = np.power(np.power((xmap[rr, cc] - v1[0]), 2) + np.power((ymap[rr, cc] - v1[1]), 2), 0.5)
+
+            if np.sqrt(np.sum((v0 - v) ** 2)) <= 1e-4:
+                continue
+
+            angle[rr, cc] = np.sum((v0 - v) * np.array([0., 1.])) / np.sqrt(np.sum((v0 - v) ** 2))  # theta
+
+        lleng_ = np.clip(lleng, 0, 128 * scale - 1e-4) / (128 * scale)
 
         if ang_type == "cosine":
             angle = (angle + 1) * lcmap / 2

@@ -21,11 +21,14 @@ def collate(batch):
     )
 
 
+# LineDataset又名WireframeDataset，是torch.utils.data.Dataset
 class LineDataset(Dataset):
     def __init__(self, rootdir, split, dataset="shanghaiTech"):
         print("dataset:", dataset)
         self.rootdir = rootdir
         if dataset in ["shanghaiTech", "york"]:
+            # 获取指定目录下的所有npz标注文件并排序
+            # 即data/(train/valid)/*_label.npz
             filelist = glob.glob(f"{rootdir}/{split}/*_label.npz")
             filelist.sort()
         else:
@@ -36,6 +39,7 @@ class LineDataset(Dataset):
         self.split = split
         self.filelist = filelist
 
+    # len(LineDataset)返回的是数据集的个数
     def __len__(self):
         return len(self.filelist)
 
@@ -48,6 +52,7 @@ class LineDataset(Dataset):
 
     def __getitem__(self, idx):
         iname = self._get_im_name(idx)
+        # skimage.io.imread(img_dir) -> 读取图片
         image_ = io.imread(iname).astype(float)[:, :, :3]
 
         target = {}
@@ -55,12 +60,15 @@ class LineDataset(Dataset):
 
             # step 1 load npz
             lcmap, lcoff, lleng, angle = WireframeHuangKun.glsd_parsing(
+                # data/(train/valid)/*_line.npz
                 self.filelist[idx].replace("label", "line"),
+                # radian/cosine
                 M.ang_type
             )
             with np.load(self.filelist[idx]) as npz:
                 lpos = npz["lpos"][:, :, :2]
 
+                # 读出正样本并给标签值为1
                 meta = {
                     "lpre": torch.from_numpy(lpos[:, :, :2]),
                     "lpre_label": torch.ones(len(lpos)),
@@ -69,6 +77,7 @@ class LineDataset(Dataset):
             # step 2 crop augment
             if self.split == "train":
                 if M.crop:
+                    # s是0.9-M.crop_factor之间的float值
                     s = np.random.choice(np.arange(0.9, M.crop_factor, 0.1))
                     image_t, lcmap, lcoff, lleng, angle, cropped_lines, cropped_region \
                         = CropAugmentation.random_crop_augmentation(image_, lpos, s)
@@ -80,10 +89,10 @@ class LineDataset(Dataset):
                 image_, lcmap, lcoff, lleng, angle = ResizeResolution.resize(
                     lpos=lpos, image=image_, resolu=M.resolution)
 
-            target["lcmap"] = torch.from_numpy(lcmap).float()
-            target["lcoff"] = torch.from_numpy(lcoff).float()
-            target["lleng"] = torch.from_numpy(lleng).float()
-            target["angle"] = torch.from_numpy(angle).float()
+            target["lcmap"] = torch.from_numpy(lcmap).float()  # 128,128
+            target["lcoff"] = torch.from_numpy(lcoff).float()  # 2,128,128
+            target["lleng"] = torch.from_numpy(lleng).float()  # 2,128,128
+            target["angle"] = torch.from_numpy(angle).float()  # 128,128
 
         else:
             raise NotImplementedError
